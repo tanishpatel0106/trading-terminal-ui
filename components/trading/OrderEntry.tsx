@@ -24,6 +24,7 @@ export function OrderEntry() {
   const setSelectedPrice = useStore(s => s.setSelectedPrice)
   const placeOrder = useStore(s => s.placeOrder)
   const cancelAll = useStore(s => s.cancelAll)
+  const ordersStreamStatus = useStore(s => s.streamStatus.orders)
 
   const handleSubmit = useCallback(() => {
     const price = selectedType === 'MKT'
@@ -142,6 +143,7 @@ export function OrderEntry() {
       {/* Submit */}
       <Button
         onClick={handleSubmit}
+        disabled={ordersStreamStatus !== "connected"}
         className={`h-8 text-[11px] font-semibold ${
           isBuy
             ? 'bg-buy hover:bg-buy/90 text-background'
