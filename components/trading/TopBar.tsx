@@ -1,5 +1,6 @@
 'use client'
 
+import { useCallback, useMemo } from 'react'
 import { useStore } from '@/lib/store'
 import { SYMBOLS } from '@/lib/engine/models'
 import { Play, Pause, Square, Wifi } from 'lucide-react'
@@ -36,10 +37,17 @@ export function TopBar() {
     setSessionState('PAUSED')
   }
 
-  const changeSpeed = async (v: number) => {
-    setReplaySpeedState(v)
-    if (sessionId) await setReplaySpeed(sessionId, v)
-  }
+  const sliderValue = useMemo(() => [replaySpeed], [replaySpeed])
+
+  const handleSpeedChange = useCallback(([nextSpeed]: number[]) => {
+    if (nextSpeed === replaySpeed) return
+    setReplaySpeedState(nextSpeed)
+  }, [replaySpeed, setReplaySpeedState])
+
+  const handleSpeedCommit = useCallback(async ([nextSpeed]: number[]) => {
+    if (nextSpeed === replaySpeed || !sessionId) return
+    await setReplaySpeed(sessionId, nextSpeed)
+  }, [replaySpeed, sessionId])
 
   return (
     <header className="flex items-center h-10 px-3 border-b border-border bg-card gap-4 shrink-0">
@@ -69,7 +77,15 @@ export function TopBar() {
         </div>
         <div className="flex items-center gap-1.5 w-24">
           <span className="text-[9px] text-muted-foreground whitespace-nowrap">{replaySpeed}x</span>
-          <Slider value={[replaySpeed]} onValueChange={([v]) => changeSpeed(v)} min={0.25} max={10} step={0.25} className="w-full" />
+          <Slider
+            value={sliderValue}
+            onValueChange={handleSpeedChange}
+            onValueCommit={handleSpeedCommit}
+            min={0.25}
+            max={10}
+            step={0.25}
+            className="w-full"
+          />
         </div>
         <button onClick={() => setUserRole(userRole === 'TRADER' ? 'ADMIN' : 'TRADER')} className={`h-5 px-2 text-[9px] font-bold rounded-sm tracking-wider ${userRole === 'ADMIN' ? 'bg-warning/20 text-warning' : 'bg-primary/20 text-primary'}`}>{userRole}</button>
       </div>
