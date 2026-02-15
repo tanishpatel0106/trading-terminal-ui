@@ -1,7 +1,8 @@
+import asyncio
 import os
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test.db"
 
@@ -21,9 +22,12 @@ def cleanup_db_file():
 
 
 @pytest.fixture(scope="session", autouse=True)
-async def prepare_db():
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+def prepare_db():
+    async def _create_tables() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+    asyncio.run(_create_tables())
     yield
 
 
