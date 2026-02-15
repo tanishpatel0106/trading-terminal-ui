@@ -1,4 +1,5 @@
 from logging.config import fileConfig
+import os
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
@@ -9,7 +10,14 @@ from app.db.models import event, order, session, trade  # noqa: F401
 
 config = context.config
 settings = get_settings()
-config.set_main_option("sqlalchemy.url", settings.database_url)
+
+# Use DATABASE_URL if provided; otherwise fall back to settings.
+db_url = os.getenv("DATABASE_URL", settings.database_url)
+
+# Alembic must use a SYNC driver. If we get asyncpg, swap it to psycopg.
+db_url = db_url.replace("postgresql+asyncpg://", "postgresql+psycopg://")
+
+config.set_main_option("sqlalchemy.url", db_url)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
