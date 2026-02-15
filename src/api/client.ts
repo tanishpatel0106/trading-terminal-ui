@@ -1,7 +1,6 @@
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ||
-  // vite compatibility
-  (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_BASE_URL) ||
+  process.env.VITE_API_BASE_URL ||
   'http://localhost:8000'
 
 export class ApiError extends Error {
