@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback } from 'react'
 import { useStore } from '@/lib/store'
 import { SYMBOLS } from '@/lib/engine/models'
 import { Play, Pause, Square, Wifi } from 'lucide-react'
@@ -37,17 +37,12 @@ export function TopBar() {
     setSessionState('PAUSED')
   }
 
-  const sliderValue = useMemo(() => [replaySpeed], [replaySpeed])
-
-  const handleSpeedChange = useCallback(([nextSpeed]: number[]) => {
+  const handleSpeedCommit = useCallback(async ([nextSpeed]: number[]) => {
     if (nextSpeed === replaySpeed) return
     setReplaySpeedState(nextSpeed)
-  }, [replaySpeed, setReplaySpeedState])
-
-  const handleSpeedCommit = useCallback(async ([nextSpeed]: number[]) => {
-    if (nextSpeed === replaySpeed || !sessionId) return
+    if (!sessionId) return
     await setReplaySpeed(sessionId, nextSpeed)
-  }, [replaySpeed, sessionId])
+  }, [replaySpeed, sessionId, setReplaySpeedState])
 
   return (
     <header className="flex items-center h-10 px-3 border-b border-border bg-card gap-4 shrink-0">
@@ -78,8 +73,8 @@ export function TopBar() {
         <div className="flex items-center gap-1.5 w-24">
           <span className="text-[9px] text-muted-foreground whitespace-nowrap">{replaySpeed}x</span>
           <Slider
-            value={sliderValue}
-            onValueChange={handleSpeedChange}
+            key={`replay-speed-${replaySpeed}`}
+            defaultValue={[replaySpeed]}
             onValueCommit={handleSpeedCommit}
             min={0.25}
             max={10}
