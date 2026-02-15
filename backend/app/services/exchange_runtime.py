@@ -49,15 +49,15 @@ class ExchangeRuntime:
                     db_order_id = self.engine_to_db.get(tr.order_id)
                     await persistence.create_trade(self.session_id, tr.price / 10000.0, tr.size, tr.side, taker_order_id=db_order_id)
                     await persistence.log_event(self.session_id, "TRADE", asdict(tr))
-                    await self.broadcaster.publish_trade(str(self.session_id), {"event_type": "TRADE", "ts_ms": now_ms(), "payload": {"price": tr.price / 10000.0, "qty": tr.size, "side": tr.side}})
+                    await self.broadcaster.publish_trade(str(self.session_id), {"event": "trade", "ts": now_ms(), "price": tr.price / 10000.0, "size": tr.size, "aggressor": tr.side})
 
             await persistence.log_event(self.session_id, "BOOK_EVENT", {"type": int(EventType.INSERT), "engine_order_id": engine_order_id})
             await persistence.db.commit()
 
             snapshot = await self.get_snapshot(levels=20)
-            await self.broadcaster.publish_marketdata(str(self.session_id), {"event_type": "SNAPSHOT", "ts_ms": now_ms(), "payload": snapshot})
+            await self.broadcaster.publish_marketdata(str(self.session_id), {"event": "snapshot", "bids": snapshot["bids"], "asks": snapshot["asks"], "ts": now_ms()})
             order = await persistence.get_order(rec.id)
-            await self.broadcaster.publish_order_update(str(self.session_id), user_id, {"event_type": "ORDER_UPDATE", "ts_ms": now_ms(), "payload": {"order_id": str(rec.id), "status": order.status.value, "leaves_qty": order.leaves_qty}})
+            await self.broadcaster.publish_order_update(str(self.session_id), user_id, {"event": "order", "ts": now_ms(), "order_id": str(rec.id), "status": order.status.value, "leaves_qty": order.leaves_qty, "side": order.side, "price": float(order.price or 0), "qty": order.qty})
             return order
 
     async def cancel_order(self, persistence: PersistenceService, order: OrderRecord) -> OrderRecord:
@@ -72,7 +72,7 @@ class ExchangeRuntime:
             await persistence.update_order(order, status=status, leaves_qty=0 if status == OrderStatus.CANCELED else order.leaves_qty)
             await persistence.log_event(self.session_id, "CANCEL", {"order_id": str(order.id), "acked": ack.acked})
             await persistence.db.commit()
-            await self.broadcaster.publish_order_update(str(self.session_id), order.user_id, {"event_type": "ORDER_UPDATE", "ts_ms": now_ms(), "payload": {"order_id": str(order.id), "status": status.value}})
+            await self.broadcaster.publish_order_update(str(self.session_id), order.user_id, {"event": "order", "ts": now_ms(), "order_id": str(order.id), "status": status.value, "leaves_qty": order.leaves_qty, "side": order.side, "price": float(order.price or 0), "qty": order.qty})
             return order
 
     async def modify_order(self, persistence: PersistenceService, order: OrderRecord, price: float | None, qty: int | None) -> OrderRecord:

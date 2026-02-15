@@ -39,3 +39,8 @@ export function orderAge(ts: number): string {
   if (diff < 3600000) return `${Math.floor(diff / 60000)}m`
   return `${Math.floor(diff / 3600000)}h`
 }
+
+
+export function formatPriceFromTicks(priceTicks: number, tickSize: number): string {
+  return (priceTicks * tickSize).toFixed(2)
+}

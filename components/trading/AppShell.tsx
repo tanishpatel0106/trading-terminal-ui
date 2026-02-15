@@ -1,8 +1,9 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useStore } from '@/lib/store'
 import { useHotkeys } from '@/hooks/use-hotkeys'
+import { useMarketDataStream, useOrderUpdatesStream, useTradesStream } from '@/src/api/ws'
 import { TopBar } from './TopBar'
 import { DomLadder } from './DomLadder'
 import { OrderEntry } from './OrderEntry'
@@ -11,22 +12,36 @@ import { TimeSales } from './TimeSales'
 import { MicroStats } from './MicroStats'
 import { BottomDock } from './BottomDock'
 import { HotkeyHelp } from './HotkeyHelp'
+import { SessionConnectModal } from './SessionConnectModal'
 
 export function AppShell() {
-  const startEngine = useStore(s => s.startEngine)
-  const stopEngine = useStore(s => s.stopEngine)
   const focusedIndex = useStore(s => s.focusedLadderIndex)
   const book = useStore(s => s.book)
   const symbol = useStore(s => s.symbol)
+  const sessionId = useStore(s => s.sessionId)
+  const userId = useStore(s => s.userId)
+  const connectSession = useStore(s => s.connectSession)
+  const updateFromMarketData = useStore(s => s.updateFromMarketData)
+  const updateFromTrade = useStore(s => s.updateFromTrade)
+  const updateFromOrderUpdate = useStore(s => s.updateFromOrderUpdate)
+  const setStreamStatus = useStore(s => s.setStreamStatus)
+  const resyncSnapshot = useStore(s => s.resyncSnapshot)
+  const streamStatus = useStore(s => s.streamStatus)
 
   useHotkeys()
 
   useEffect(() => {
-    startEngine()
-    return () => stopEngine()
-  }, [startEngine, stopEngine])
+    const savedSession = localStorage.getItem('tt.session_id')
+    const savedUser = localStorage.getItem('tt.user_id')
+    if (savedUser) useStore.getState().setUserId(savedUser)
+    if (savedSession) connectSession(savedSession)
+  }, [connectSession])
 
-  // Get focused price for indicator
+  const onResync = useCallback(() => { resyncSnapshot() }, [resyncSnapshot])
+  useMarketDataStream(sessionId, updateFromMarketData, (s) => setStreamStatus('marketdata', s), onResync)
+  useTradesStream(sessionId, updateFromTrade as any, (s) => setStreamStatus('trades', s))
+  useOrderUpdatesStream(sessionId, userId, updateFromOrderUpdate, (s) => setStreamStatus('orders', s))
+
   let focusedPrice: number | null = null
   if (focusedIndex !== null && book.bids.length > 0) {
     const allAsks = [...book.asks].slice(0, 20).reverse()
@@ -36,56 +51,29 @@ export function AppShell() {
     if (level) focusedPrice = level.price
   }
 
+  const reconnecting = Object.values(streamStatus).some(v => v !== 'connected')
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground">
-      {/* Top Bar */}
+      {!sessionId && <SessionConnectModal />}
+      {reconnecting && sessionId && <div className="h-7 text-xs bg-warning/20 text-warning px-3 flex items-center">Reconnecting…</div>}
       <TopBar />
-
-      {/* Main 3-column area */}
       <div className="flex-1 grid grid-cols-[280px_1fr_260px] min-h-0 overflow-hidden">
-        {/* Left Column: Order Entry + Blotter */}
         <div className="flex flex-col min-h-0 border-r border-border bg-card">
           <OrderEntry />
-          <div className="flex-1 flex flex-col min-h-0">
-            <WorkingOrders />
-          </div>
-          <div className="h-[200px] border-t border-border shrink-0">
-            <FillsTable />
-          </div>
+          <div className="flex-1 flex flex-col min-h-0"><WorkingOrders /></div>
+          <div className="h-[200px] border-t border-border shrink-0"><FillsTable /></div>
         </div>
-
-        {/* Center Column: DOM Ladder */}
         <div className="flex flex-col min-h-0 bg-background">
-          {/* Focused price indicator */}
-          {focusedPrice !== null && (
-            <div className="flex items-center h-5 px-2 bg-primary/10 border-b border-primary/20 shrink-0">
-              <span className="text-[10px] text-primary font-medium">
-                FOCUSED: {focusedPrice.toFixed(2)} ({symbol})
-              </span>
-            </div>
-          )}
+          {focusedPrice !== null && <div className="flex items-center h-5 px-2 bg-primary/10 border-b border-primary/20 shrink-0"><span className="text-[10px] text-primary font-medium">FOCUSED: {focusedPrice.toFixed(2)} ({symbol})</span></div>}
           <DomLadder />
         </div>
-
-        {/* Right Column: Tape + Stats */}
         <div className="flex flex-col min-h-0 border-l border-border bg-card">
-          <div className="flex-1 min-h-0">
-            <TimeSales />
-          </div>
-          <div className="border-t border-border shrink-0">
-            <MicroStats />
-          </div>
+          <div className="flex-1 min-h-0"><TimeSales /></div>
+          <div className="border-t border-border shrink-0"><MicroStats /></div>
         </div>
       </div>
-
-      {/* Bottom Dock */}
-      <div className="h-[140px] shrink-0 relative">
-        <BottomDock />
-        {/* Hotkey help button */}
-        <div className="absolute bottom-2 right-2">
-          <HotkeyHelp />
-        </div>
-      </div>
+      <div className="h-[140px] shrink-0 relative"><BottomDock /><div className="absolute bottom-2 right-2"><HotkeyHelp /></div></div>
     </div>
   )
 }

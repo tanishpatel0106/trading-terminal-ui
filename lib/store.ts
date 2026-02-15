@@ -1,47 +1,29 @@
 'use client'
 
 import { create } from 'zustand'
-import { MarketEngine } from './engine/marketEngine'
-import {
-  createOrder, acknowledgeOrder, activateOrder, cancelOrder, tryFillOrder,
-} from './engine/orderFsm'
-import type {
-  Side, OrderType, TIF, Order, Fill, Trade, BookSnapshot, MicroStats,
-  LogEntry, Position, SessionState, Symbol,
-} from './engine/models'
+import type { Side, OrderType, TIF, Order, Fill, Trade, BookSnapshot, MicroStats, LogEntry, Position, SessionState, Symbol } from './engine/models'
+import { cancelOrder, listOrders, placeOrder } from '@/src/api/orders'
+import { fetchSnapshot } from '@/src/api/marketdata'
+import { fetchRecentTrades } from '@/src/api/trades'
 
-let logId = 0
-function uid() { return `log-${++logId}` }
-
-interface Settings {
-  ladderLevels: number
-  updateSpeed: number
-  density: 'compact' | 'comfy'
-}
+interface Settings { ladderLevels: number; updateSpeed: number; density: 'compact' | 'comfy' }
 
 interface TradingStore {
-  // Session
+  sessionId: string | null
+  userId: string
   sessionState: SessionState
   replaySpeed: number
   userRole: 'TRADER' | 'ADMIN'
   latency: number
-
-  // Symbol
   symbol: Symbol
-
-  // Market Data
   book: BookSnapshot
   stats: MicroStats
   trades: Trade[]
   midHistory: number[]
-
-  // Orders & Fills
   orders: Order[]
   fills: Fill[]
   logs: LogEntry[]
   position: Position
-
-  // UI
   selectedSide: Side
   selectedType: OrderType
   selectedTif: TIF
@@ -50,12 +32,8 @@ interface TradingStore {
   focusedLadderIndex: number | null
   dockTab: 'logs' | 'risk' | 'replay' | 'settings'
   settings: Settings
+  streamStatus: { marketdata: string; trades: string; orders: string }
 
-  // Engine ref
-  engine: MarketEngine | null
-  intervalId: ReturnType<typeof setInterval> | null
-
-  // Actions
   setSymbol: (s: Symbol) => void
   setSessionState: (s: SessionState) => void
   setReplaySpeed: (s: number) => void
@@ -69,64 +47,46 @@ interface TradingStore {
   setDockTab: (t: 'logs' | 'risk' | 'replay' | 'settings') => void
   updateSettings: (s: Partial<Settings>) => void
 
-  placeOrder: (side: Side, type: OrderType, price: number, qty: number, tif: TIF) => void
-  cancelOrderById: (id: string) => void
-  cancelAll: () => void
-  modifyOrder: (id: string, updates: { price?: number; qty?: number }) => void
+  connectSession: (sessionId: string) => Promise<void>
+  setUserId: (userId: string) => void
+  setStreamStatus: (stream: 'marketdata' | 'trades' | 'orders', status: string) => void
+  updateFromMarketData: (msg: any) => void
+  updateFromTrade: (msg: any) => void
+  updateFromOrderUpdate: (msg: any) => void
+  resyncSnapshot: () => Promise<void>
 
+  placeOrder: (side: Side, type: OrderType, price: number, qty: number, tif: TIF) => Promise<void>
+  cancelOrderById: (id: string) => Promise<void>
+  cancelAll: () => Promise<void>
+  modifyOrder: (id: string, updates: { price?: number; qty?: number }) => void
   startEngine: () => void
   stopEngine: () => void
   tickEngine: () => void
 }
 
+const emptyBook: BookSnapshot = { bids: [], asks: [], mid: 0, spread: 0, lastTradePrice: 0, lastTradeSide: 'BUY' }
+
 export const useStore = create<TradingStore>((set, get) => ({
-  // Initial state
+  sessionId: null,
+  userId: 'trader1',
   sessionState: 'PAUSED',
   replaySpeed: 1,
   userRole: 'TRADER',
-  latency: 3,
-
+  latency: 0,
   symbol: 'AAPL',
-
-  book: {
-    bids: [], asks: [], mid: 0, spread: 0, lastTradePrice: 0, lastTradeSide: 'BUY',
-  },
-  stats: {
-    spread: 0, mid: 0, microprice: 0, imbalance: 0,
-    tradesPerSec: 0, volume60s: 0, bookUpdateRate: 0,
-  },
+  book: emptyBook,
+  stats: { spread: 0, mid: 0, microprice: 0, imbalance: 0, tradesPerSec: 0, volume60s: 0, bookUpdateRate: 0 },
   trades: [],
   midHistory: [],
-
   orders: [],
   fills: [],
   logs: [],
   position: { symbol: 'AAPL', qty: 0, avgPx: 0, realizedPnl: 0, unrealizedPnl: 0 },
+  selectedSide: 'BUY', selectedType: 'LMT', selectedTif: 'DAY', selectedQty: 100, selectedPrice: 0,
+  focusedLadderIndex: null, dockTab: 'logs', settings: { ladderLevels: 25, updateSpeed: 200, density: 'compact' },
+  streamStatus: { marketdata: 'disconnected', trades: 'disconnected', orders: 'disconnected' },
 
-  selectedSide: 'BUY',
-  selectedType: 'LMT',
-  selectedTif: 'DAY',
-  selectedQty: 100,
-  selectedPrice: 0,
-  focusedLadderIndex: null,
-  dockTab: 'logs',
-  settings: { ladderLevels: 25, updateSpeed: 200, density: 'compact' },
-
-  engine: null,
-  intervalId: null,
-
-  setSymbol: (s) => {
-    const engine = get().engine ?? new MarketEngine(s)
-    engine.switchSymbol(s)
-    set({
-      symbol: s,
-      engine,
-      trades: [],
-      midHistory: [],
-      position: { symbol: s, qty: 0, avgPx: 0, realizedPnl: 0, unrealizedPnl: 0 },
-    })
-  },
-
+  setSymbol: (s) => set({ symbol: s }),
   setSessionState: (s) => set({ sessionState: s }),
   setReplaySpeed: (s) => set({ replaySpeed: s }),
   setUserRole: (r) => set({ userRole: r }),
@@ -137,233 +97,80 @@ export const useStore = create<TradingStore>((set, get) => ({
   setSelectedPrice: (p) => set({ selectedPrice: p }),
   setFocusedLadderIndex: (i) => set({ focusedLadderIndex: i }),
   setDockTab: (t) => set({ dockTab: t }),
-  updateSettings: (s) => {
-    const current = get().settings
-    const newSettings = { ...current, ...s }
-    set({ settings: newSettings })
-    // If update speed changed and engine is running, restart
-    if (s.updateSpeed && get().intervalId) {
-      get().stopEngine()
-      setTimeout(() => get().startEngine(), 50)
-    }
-  },
+  updateSettings: (s) => set(state => ({ settings: { ...state.settings, ...s } })),
 
-  placeOrder: (side, type, price, qty, tif) => {
-    const { symbol, book } = get()
-    const order = createOrder(side, type, price, qty, tif, symbol)
-
-    // Log
-    const log: LogEntry = {
-      ts: Date.now(),
-      type: 'ORDER',
-      message: `${side} ${type} ${qty}@${price.toFixed(2)} ${tif} [${order.id}]`,
-      id: uid(),
-    }
-
-    // Process order lifecycle: NEW -> ACK -> try fill
-    let processed = acknowledgeOrder(order)
-
-    if (type === 'MKT' || (type === 'LMT' && book.bids.length > 0)) {
-      const bestBid = book.bids[0]?.price ?? 0
-      const bestAsk = book.asks[0]?.price ?? 0
-      const bestBidSize = book.bids[0]?.size ?? 0
-      const bestAskSize = book.asks[0]?.size ?? 0
-      const result = tryFillOrder(processed, bestBid, bestAsk, bestBidSize, bestAskSize)
-      processed = result.order
-
-      if (result.fills.length > 0) {
-        const newFills = result.fills.map(f => ({
-          ...f,
-          pnlImpact: side === 'BUY' ? -(f.price * f.qty) : f.price * f.qty,
-        }))
-
-        // Update position
-        const pos = { ...get().position }
-        for (const fill of newFills) {
-          if (fill.side === 'BUY') {
-            const newQty = pos.qty + fill.qty
-            pos.avgPx = pos.qty === 0 ? fill.price : (pos.avgPx * pos.qty + fill.price * fill.qty) / newQty
-            pos.qty = newQty
-          } else {
-            if (pos.qty > 0) {
-              const sellQty = Math.min(fill.qty, pos.qty)
-              pos.realizedPnl += (fill.price - pos.avgPx) * sellQty
-              pos.qty -= sellQty
-              if (pos.qty <= 0) { pos.qty = 0; pos.avgPx = 0 }
-            } else {
-              const newQty = pos.qty - fill.qty
-              pos.avgPx = pos.qty === 0 ? fill.price : (pos.avgPx * Math.abs(pos.qty) + fill.price * fill.qty) / Math.abs(newQty)
-              pos.qty = newQty
-            }
-          }
-        }
-
-        const fillLogs = newFills.map(f => ({
-          ts: f.ts,
-          type: 'FILL' as const,
-          message: `FILL ${f.side} ${f.qty}@${f.price.toFixed(2)} [${f.orderId}]`,
-          id: uid(),
-        }))
-
-        set(state => ({
-          fills: [...newFills, ...state.fills].slice(0, 200),
-          logs: [...fillLogs, ...state.logs].slice(0, 500),
-          position: pos,
-        }))
-      }
-
-      if (processed.status === 'REJ') {
-        set(state => ({
-          logs: [{ ts: Date.now(), type: 'REJECT', message: `REJECT ${order.id}: ${tif} not satisfiable`, id: uid() }, ...state.logs].slice(0, 500),
-        }))
-      }
-    } else {
-      processed = activateOrder(processed)
-    }
-
-    set(state => ({
-      orders: [processed, ...state.orders].slice(0, 200),
-      logs: [log, ...state.logs].slice(0, 500),
-    }))
-  },
-
-  cancelOrderById: (id) => {
-    set(state => {
-      const orders = state.orders.map(o => o.id === id ? cancelOrder(o) : o)
-      const cancelled = orders.find(o => o.id === id)
-      const log: LogEntry = {
-        ts: Date.now(), type: 'CANCEL',
-        message: `CANCEL ${id} ${cancelled?.status ?? ''}`,
-        id: uid(),
-      }
-      return { orders, logs: [log, ...state.logs].slice(0, 500) }
+  connectSession: async (sessionId: string) => {
+    set({ sessionId })
+    localStorage.setItem('tt.session_id', sessionId)
+    await get().resyncSnapshot()
+    const trades = await fetchRecentTrades(sessionId)
+    set({
+      trades: trades.map((t: any) => ({ id: t.id, ts: Date.parse(t.ts), price: Number(t.price), size: t.qty, side: t.side === 'B' ? 'BUY' : 'SELL' })),
+    })
+    const orders = await listOrders(sessionId, get().userId)
+    set({
+      orders: orders.map((o: any) => ({ id: o.id, ts: Date.parse(o.created_at), side: o.side === 'B' ? 'BUY' : 'SELL', type: o.type === 'LIMIT' ? 'LMT' : 'MKT', price: Number(o.price || 0), qty: o.qty, filledQty: o.qty - o.leaves_qty, leaves: o.leaves_qty, status: o.status === 'CANCELED' ? 'CXL' : o.status === 'REJECTED' ? 'REJ' : o.status, tif: o.tif || 'DAY', symbol: get().symbol })),
     })
   },
-
-  cancelAll: () => {
+  setUserId: (userId: string) => {
+    set({ userId })
+    localStorage.setItem('tt.user_id', userId)
+  },
+  setStreamStatus: (stream, status) => set(state => ({ streamStatus: { ...state.streamStatus, [stream]: status } })),
+  updateFromMarketData: (msg) => {
+    if (msg.event !== 'snapshot') return
+    const bids = (msg.bids || []).map((b: any) => ({ price: Number(b.price), size: b.size, ordersCount: b.orders }))
+    const asks = (msg.asks || []).map((a: any) => ({ price: Number(a.price), size: a.size, ordersCount: a.orders }))
+    if (!bids.length || !asks.length) return
+    const mid = (bids[0].price + asks[0].price) / 2
+    const spread = asks[0].price - bids[0].price
+    set(state => ({
+      book: { bids, asks, mid, spread, lastTradePrice: state.book.lastTradePrice || mid, lastTradeSide: state.book.lastTradeSide },
+      stats: { ...state.stats, mid, spread },
+      midHistory: [...state.midHistory.slice(-199), mid],
+    }))
+  },
+  updateFromTrade: (msg) => {
+    if (msg.event !== 'trade') return
+    const trade: Trade = { id: `${msg.ts}-${Math.random()}`, ts: msg.ts, price: Number(msg.price), size: msg.size, side: msg.aggressor === 'B' ? 'BUY' : 'SELL' }
+    set(state => ({ trades: [trade, ...state.trades].slice(0, 500), book: { ...state.book, lastTradePrice: trade.price, lastTradeSide: trade.side } }))
+  },
+  updateFromOrderUpdate: (msg) => {
+    if (msg.event !== 'order') return
+    const mappedStatus = msg.status === 'CANCELED' ? 'CXL' : msg.status === 'REJECTED' ? 'REJ' : msg.status
     set(state => {
-      const orders = state.orders.map(o =>
-        (o.status === 'LIVE' || o.status === 'PARTIAL' || o.status === 'ACK' || o.status === 'NEW')
-          ? cancelOrder(o)
-          : o
-      )
-      const log: LogEntry = {
-        ts: Date.now(), type: 'CANCEL', message: 'CANCEL ALL', id: uid(),
+      const idx = state.orders.findIndex(o => o.id === msg.order_id)
+      if (idx >= 0) {
+        const next = [...state.orders]
+        next[idx] = { ...next[idx], status: mappedStatus, leaves: msg.leaves_qty ?? next[idx].leaves, filledQty: (next[idx].qty - (msg.leaves_qty ?? next[idx].leaves)) }
+        return { orders: next }
       }
-      return { orders, logs: [log, ...state.logs].slice(0, 500) }
+      return { orders: [{ id: msg.order_id, ts: msg.ts, side: msg.side === 'S' ? 'SELL' : 'BUY', type: 'LMT', price: Number(msg.price || 0), qty: msg.qty || 0, leaves: msg.leaves_qty ?? msg.qty ?? 0, filledQty: 0, status: mappedStatus, tif: 'DAY', symbol: state.symbol }, ...state.orders] }
     })
   },
-
-  modifyOrder: (id, updates) => {
-    set(state => ({
-      orders: state.orders.map(o => {
-        if (o.id !== id) return o
-        if (o.status === 'FILLED' || o.status === 'CXL' || o.status === 'REJ') return o
-        return {
-          ...o,
-          price: updates.price ?? o.price,
-          qty: updates.qty ?? o.qty,
-          leaves: (updates.qty ?? o.qty) - o.filledQty,
-        }
-      }),
-    }))
+  resyncSnapshot: async () => {
+    const sessionId = get().sessionId
+    if (!sessionId) return
+    const snapshot = await fetchSnapshot(sessionId)
+    get().updateFromMarketData(snapshot)
   },
 
-  startEngine: () => {
-    let engine = get().engine
-    if (!engine) {
-      engine = new MarketEngine(get().symbol)
-      set({ engine })
-    }
-
-    const speed = get().settings.updateSpeed
-    const id = setInterval(() => {
-      if (get().sessionState !== 'PAUSED') {
-        get().tickEngine()
-      }
-    }, speed)
-
-    set({ intervalId: id, sessionState: 'LIVE' })
+  placeOrder: async (side, type, price, qty, tif) => {
+    const { sessionId, userId } = get()
+    if (!sessionId) return
+    await placeOrder(sessionId, { user_id: userId, side: side === 'BUY' ? 'B' : 'S', type: type === 'LMT' ? 'LIMIT' : 'MARKET', qty, price: type === 'LMT' ? price : undefined, tif })
   },
-
-  stopEngine: () => {
-    const id = get().intervalId
-    if (id) clearInterval(id)
-    set({ intervalId: null, sessionState: 'PAUSED' })
+  cancelOrderById: async (id) => {
+    const sessionId = get().sessionId
+    if (!sessionId) return
+    await cancelOrder(sessionId, id)
   },
-
-  tickEngine: () => {
-    const engine = get().engine
-    if (!engine) return
-
-    const { snapshot, newTrades, stats } = engine.tick()
-    const latency = Math.round(1 + Math.random() * 5)
-
-    // Check resting orders for fills
-    const updatedOrders = [...get().orders]
-    const newFills: Fill[] = []
-
-    for (let i = 0; i < updatedOrders.length; i++) {
-      const o = updatedOrders[i]
-      if (o.status !== 'LIVE' && o.status !== 'PARTIAL') continue
-
-      const bestBid = snapshot.bids[0]?.price ?? 0
-      const bestAsk = snapshot.asks[0]?.price ?? 0
-      const bestBidSize = snapshot.bids[0]?.size ?? 0
-      const bestAskSize = snapshot.asks[0]?.size ?? 0
-
-      const result = tryFillOrder(o, bestBid, bestAsk, bestBidSize, bestAskSize)
-      updatedOrders[i] = result.order
-      newFills.push(...result.fills)
-    }
-
-    // Update position with new fills
-    if (newFills.length > 0) {
-      const pos = { ...get().position }
-      for (const fill of newFills) {
-        if (fill.side === 'BUY') {
-          const newQty = pos.qty + fill.qty
-          pos.avgPx = pos.qty === 0 ? fill.price : (pos.avgPx * pos.qty + fill.price * fill.qty) / newQty
-          pos.qty = newQty
-        } else {
-          if (pos.qty > 0) {
-            const sellQty = Math.min(fill.qty, pos.qty)
-            pos.realizedPnl += (fill.price - pos.avgPx) * sellQty
-            pos.qty -= sellQty
-          } else {
-            pos.qty -= fill.qty
-            pos.avgPx = fill.price
-          }
-        }
-      }
-      // Unrealized PnL
-      pos.unrealizedPnl = pos.qty !== 0 ? (snapshot.mid - pos.avgPx) * pos.qty : 0
-
-      const fillLogs = newFills.map(f => ({
-        ts: f.ts, type: 'FILL' as const,
-        message: `FILL ${f.side} ${f.qty}@${f.price.toFixed(2)} [${f.orderId}]`,
-        id: uid(),
-      }))
-
-      set(state => ({
-        orders: updatedOrders,
-        fills: [...newFills.map(f => ({ ...f, pnlImpact: f.side === 'BUY' ? -(f.price * f.qty) : f.price * f.qty })), ...state.fills].slice(0, 200),
-        logs: [...fillLogs, ...state.logs].slice(0, 500),
-        position: pos,
-      }))
-    } else {
-      // Update unrealized PnL
-      const pos = { ...get().position }
-      pos.unrealizedPnl = pos.qty !== 0 ? (snapshot.mid - pos.avgPx) * pos.qty : 0
-      set({ orders: updatedOrders, position: pos })
-    }
-
-    set(state => ({
-      book: snapshot,
-      stats,
-      trades: [...state.trades, ...newTrades].slice(-500),
-      midHistory: [...state.midHistory, snapshot.mid].slice(-120),
-      latency,
-    }))
+  cancelAll: async () => {
+    const active = get().orders.filter(o => ['NEW', 'ACK', 'LIVE', 'PARTIAL'].includes(o.status))
+    await Promise.all(active.map(o => get().cancelOrderById(o.id)))
   },
+  modifyOrder: () => {},
+  startEngine: () => {},
+  stopEngine: () => {},
+  tickEngine: () => {},
 }))
