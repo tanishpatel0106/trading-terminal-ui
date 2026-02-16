@@ -8,6 +8,10 @@ import { fetchRecentTrades } from '@/src/api/trades'
 
 interface Settings { ladderLevels: number; updateSpeed: number; density: 'compact' | 'comfy' }
 
+// ✅ NEW: strong types for stream status
+type StreamName = 'marketdata' | 'trades' | 'orders'
+type StreamStatus = 'connected' | 'reconnecting' | 'disconnected'
+
 interface TradingStore {
   sessionId: string | null
   userId: string
@@ -32,7 +36,9 @@ interface TradingStore {
   focusedLadderIndex: number | null
   dockTab: 'logs' | 'risk' | 'replay' | 'settings'
   settings: Settings
-  streamStatus: { marketdata: string; trades: string; orders: string }
+
+  // ✅ CHANGED: typed object instead of string soup
+  streamStatus: Record<StreamName, StreamStatus>
 
   setSymbol: (s: Symbol) => void
   setSessionState: (s: SessionState) => void
@@ -49,7 +55,10 @@ interface TradingStore {
 
   connectSession: (sessionId: string) => Promise<void>
   setUserId: (userId: string) => void
-  setStreamStatus: (stream: 'marketdata' | 'trades' | 'orders', status: string) => void
+
+  // ✅ CHANGED: typed + idempotent updates
+  setStreamStatus: (stream: StreamName, status: StreamStatus) => void
+
   updateFromMarketData: (msg: any) => void
   updateFromTrade: (msg: any) => void
   updateFromOrderUpdate: (msg: any) => void
@@ -84,6 +93,8 @@ export const useStore = create<TradingStore>((set, get) => ({
   position: { symbol: 'AAPL', qty: 0, avgPx: 0, realizedPnl: 0, unrealizedPnl: 0 },
   selectedSide: 'BUY', selectedType: 'LMT', selectedTif: 'DAY', selectedQty: 100, selectedPrice: 0,
   focusedLadderIndex: null, dockTab: 'logs', settings: { ladderLevels: 25, updateSpeed: 200, density: 'compact' },
+
+  // ✅ CHANGED: typed defaults
   streamStatus: { marketdata: 'disconnected', trades: 'disconnected', orders: 'disconnected' },
 
   setSymbol: (s) => set({ symbol: s }),
@@ -109,14 +120,34 @@ export const useStore = create<TradingStore>((set, get) => ({
     })
     const orders = await listOrders(sessionId, get().userId)
     set({
-      orders: orders.map((o: any) => ({ id: o.id, ts: Date.parse(o.created_at), side: o.side === 'B' ? 'BUY' : 'SELL', type: o.type === 'LIMIT' ? 'LMT' : 'MKT', price: Number(o.price || 0), qty: o.qty, filledQty: o.qty - o.leaves_qty, leaves: o.leaves_qty, status: o.status === 'CANCELED' ? 'CXL' : o.status === 'REJECTED' ? 'REJ' : o.status, tif: o.tif || 'DAY', symbol: get().symbol })),
+      orders: orders.map((o: any) => ({
+        id: o.id,
+        ts: Date.parse(o.created_at),
+        side: o.side === 'B' ? 'BUY' : 'SELL',
+        type: o.type === 'LIMIT' ? 'LMT' : 'MKT',
+        price: Number(o.price || 0),
+        qty: o.qty,
+        filledQty: o.qty - o.leaves_qty,
+        leaves: o.leaves_qty,
+        status: o.status === 'CANCELED' ? 'CXL' : o.status === 'REJECTED' ? 'REJ' : o.status,
+        tif: o.tif || 'DAY',
+        symbol: get().symbol
+      })),
     })
   },
+
   setUserId: (userId: string) => {
     set({ userId })
     localStorage.setItem('tt.user_id', userId)
   },
-  setStreamStatus: (stream, status) => set(state => ({ streamStatus: { ...state.streamStatus, [stream]: status } })),
+
+  // ✅ FIX: do nothing if status already the same (prevents infinite loops)
+  setStreamStatus: (stream, status) =>
+    set(state => {
+      if (state.streamStatus[stream] === status) return state
+      return { streamStatus: { ...state.streamStatus, [stream]: status } }
+    }),
+
   updateFromMarketData: (msg) => {
     if (msg.event !== 'snapshot') return
     const bids = (msg.bids || []).map((b: any) => ({ price: Number(b.price), size: b.size, ordersCount: b.orders }))
@@ -130,11 +161,13 @@ export const useStore = create<TradingStore>((set, get) => ({
       midHistory: [...state.midHistory.slice(-199), mid],
     }))
   },
+
   updateFromTrade: (msg) => {
     if (msg.event !== 'trade') return
     const trade: Trade = { id: `${msg.ts}-${Math.random()}`, ts: msg.ts, price: Number(msg.price), size: msg.size, side: msg.aggressor === 'B' ? 'BUY' : 'SELL' }
     set(state => ({ trades: [trade, ...state.trades].slice(0, 500), book: { ...state.book, lastTradePrice: trade.price, lastTradeSide: trade.side } }))
   },
+
   updateFromOrderUpdate: (msg) => {
     if (msg.event !== 'order') return
     const mappedStatus = msg.status === 'CANCELED' ? 'CXL' : msg.status === 'REJECTED' ? 'REJ' : msg.status
@@ -142,12 +175,32 @@ export const useStore = create<TradingStore>((set, get) => ({
       const idx = state.orders.findIndex(o => o.id === msg.order_id)
       if (idx >= 0) {
         const next = [...state.orders]
-        next[idx] = { ...next[idx], status: mappedStatus, leaves: msg.leaves_qty ?? next[idx].leaves, filledQty: (next[idx].qty - (msg.leaves_qty ?? next[idx].leaves)) }
+        next[idx] = {
+          ...next[idx],
+          status: mappedStatus,
+          leaves: msg.leaves_qty ?? next[idx].leaves,
+          filledQty: (next[idx].qty - (msg.leaves_qty ?? next[idx].leaves)),
+        }
         return { orders: next }
       }
-      return { orders: [{ id: msg.order_id, ts: msg.ts, side: msg.side === 'S' ? 'SELL' : 'BUY', type: 'LMT', price: Number(msg.price || 0), qty: msg.qty || 0, leaves: msg.leaves_qty ?? msg.qty ?? 0, filledQty: 0, status: mappedStatus, tif: 'DAY', symbol: state.symbol }, ...state.orders] }
+      return {
+        orders: [{
+          id: msg.order_id,
+          ts: msg.ts,
+          side: msg.side === 'S' ? 'SELL' : 'BUY',
+          type: 'LMT',
+          price: Number(msg.price || 0),
+          qty: msg.qty || 0,
+          leaves: msg.leaves_qty ?? msg.qty ?? 0,
+          filledQty: 0,
+          status: mappedStatus,
+          tif: 'DAY',
+          symbol: state.symbol
+        }, ...state.orders]
+      }
     })
   },
+
   resyncSnapshot: async () => {
     const sessionId = get().sessionId
     if (!sessionId) return
@@ -158,17 +211,27 @@ export const useStore = create<TradingStore>((set, get) => ({
   placeOrder: async (side, type, price, qty, tif) => {
     const { sessionId, userId } = get()
     if (!sessionId) return
-    await placeOrder(sessionId, { user_id: userId, side: side === 'BUY' ? 'B' : 'S', type: type === 'LMT' ? 'LIMIT' : 'MARKET', qty, price: type === 'LMT' ? price : undefined, tif })
+    await placeOrder(sessionId, {
+      user_id: userId,
+      side: side === 'BUY' ? 'B' : 'S',
+      type: type === 'LMT' ? 'LIMIT' : 'MARKET',
+      qty,
+      price: type === 'LMT' ? price : undefined,
+      tif
+    })
   },
+
   cancelOrderById: async (id) => {
     const sessionId = get().sessionId
     if (!sessionId) return
     await cancelOrder(sessionId, id)
   },
+
   cancelAll: async () => {
     const active = get().orders.filter(o => ['NEW', 'ACK', 'LIVE', 'PARTIAL'].includes(o.status))
     await Promise.all(active.map(o => get().cancelOrderById(o.id)))
   },
+
   modifyOrder: () => {},
   startEngine: () => {},
   stopEngine: () => {},
