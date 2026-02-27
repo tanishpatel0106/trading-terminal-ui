@@ -71,12 +71,23 @@ function aggregateCandles(
   return [...buckets.values()].sort((a, b) => a.bucketStart - b.bucketStart).slice(-maxCandles)
 }
 
-function formatCandleTime(ts: number, seconds: number) {
+function formatCandleAxisTime(ts: number, seconds: number) {
   const d = new Date(ts)
   if (seconds >= 60) {
-    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
   }
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  return d.toLocaleString([], { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function formatCandleTooltipTime(ts: number) {
+  return new Date(ts).toLocaleString([], {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 export function OhlcvPanel() {
@@ -129,7 +140,7 @@ export function OhlcvPanel() {
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
               <XAxis
                 dataKey="bucketStart"
-                tickFormatter={(value) => formatCandleTime(value, timeframe.seconds)}
+                tickFormatter={(value) => formatCandleAxisTime(value, timeframe.seconds)}
                 minTickGap={24}
                 tick={{ fontSize: 10 }}
               />
@@ -154,7 +165,7 @@ export function OhlcvPanel() {
                   if (name === 'volume') return [value, 'Volume']
                   return [formatPrice(Number(value), symbol), name.toUpperCase()]
                 }}
-                labelFormatter={(label) => formatCandleTime(Number(label), timeframe.seconds)}
+                labelFormatter={(label) => formatCandleTooltipTime(Number(label))}
               />
 
               <ReferenceLine yAxisId="price" y={latestPrice} stroke="hsl(var(--primary))" strokeOpacity={0.35} />

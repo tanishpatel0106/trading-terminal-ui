@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -15,6 +16,14 @@ from order_book import OrderBook  # noqa: E402
 
 
 AVAILABLE_STOCKS: list[dict] = []
+
+def _market_time_to_epoch_ms(market_date: str, market_seconds: float) -> int:
+    """Convert replay market date + seconds-after-midnight into epoch milliseconds."""
+    try:
+        base = datetime.strptime(market_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return int(now_ms())
+    return int((base.timestamp() + market_seconds) * 1000)
 
 
 def _discover_stocks() -> list[dict]:
@@ -128,7 +137,7 @@ class ReplaySession:
         if event:
             self.order_book.process_event(event)
         self._events_processed = 1
-        await self._broadcast_snapshot()
+        await self._broadcast_snapshot(stock["date"])
 
         seq = 2
         batch_count = 0
@@ -168,7 +177,7 @@ class ReplaySession:
                             str(self.session_id),
                             {
                                 "event": "trade",
-                                "ts": now_ms(),
+                                "ts": _market_time_to_epoch_ms(stock["date"], msg.time),
                                 "price": tr.price / 10000.0,
                                 "size": tr.size,
                                 "aggressor": tr.side,
@@ -176,22 +185,22 @@ class ReplaySession:
                         )
 
                 if batch_count >= BATCH_SIZE:
-                    await self._broadcast_snapshot()
+                    await self._broadcast_snapshot(stock["date"])
                     batch_count = 0
         except asyncio.CancelledError:
             pass
 
-        await self._broadcast_snapshot()
+        await self._broadcast_snapshot(stock["date"])
         self.is_running = False
         self.is_stopped = True
 
-    async def _broadcast_snapshot(self) -> None:
+    async def _broadcast_snapshot(self, stock_date: str) -> None:
         bids, asks = self.order_book.get_snapshot()
         snapshot = {
             "event": "snapshot",
             "bids": [{"price": b.price / 10000.0, "size": b.size, "orders": b.order_count} for b in bids[:20]],
             "asks": [{"price": a.price / 10000.0, "size": a.size, "orders": a.order_count} for a in asks[:20]],
-            "ts": now_ms(),
+            "ts": _market_time_to_epoch_ms(stock_date, self._current_time),
         }
         await self.broadcaster.publish_marketdata(str(self.session_id), snapshot)
 

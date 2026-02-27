@@ -4,7 +4,7 @@ import { useStore } from '@/lib/store'
 import { Play, Pause, Square, Wifi, RotateCcw } from 'lucide-react'
 import { pauseSession, setReplaySpeed, startSession, stopSession } from '@/src/api/sessions'
 
-const SPEED_OPTIONS = [0.5, 1, 2, 5, 10] as const
+const SPEED_OPTIONS = [0.5, 1, 2, 5, 10, 20, 30, 40, 50, 100] as const
 
 export function TopBar() {
   const symbol = useStore(s => s.symbol)
@@ -116,7 +116,7 @@ export function TopBar() {
                 replaySpeed === s ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground hover:text-foreground'
               }`}
             >
-              {s}x
+              {s}X
             </button>
           ))}
         </div>
