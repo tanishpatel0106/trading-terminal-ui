@@ -5,21 +5,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.session import TradingSession
 from app.db.session import get_db_session
 from app.services.broadcaster import Broadcaster
-from app.services.exchange_runtime import ExchangeRuntime
+from app.services.replay_service import ReplaySession, replay_sessions
 
 broadcaster = Broadcaster()
-runtimes: dict[str, ExchangeRuntime] = {}
 
 
 def get_broadcaster() -> Broadcaster:
     return broadcaster
 
 
-def get_runtime(session_id: UUID, br: Broadcaster = Depends(get_broadcaster)) -> ExchangeRuntime:
+def get_replay_session(session_id: UUID) -> ReplaySession:
     sid = str(session_id)
-    if sid not in runtimes:
-        runtimes[sid] = ExchangeRuntime(session_id=session_id, broadcaster=br)
-    return runtimes[sid]
+    if sid not in replay_sessions:
+        raise HTTPException(status_code=404, detail="replay session not found")
+    return replay_sessions[sid]
 
 
 async def get_session_or_404(session_id: UUID, db: AsyncSession = Depends(get_db_session)) -> TradingSession:

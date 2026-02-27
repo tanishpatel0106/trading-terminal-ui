@@ -1,8 +1,18 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useStore } from '@/lib/store'
-import { formatTime, formatPnl, formatPrice } from '@/lib/format'
+import { formatTime } from '@/lib/format'
 import { Slider } from '@/components/ui/slider'
+import { Progress } from '@/components/ui/progress'
+
+function formatReplayTime(secondsAfterMidnight: number): string {
+  if (!secondsAfterMidnight) return '--:--:--'
+  const hours = Math.floor(secondsAfterMidnight / 3600)
+  const minutes = Math.floor((secondsAfterMidnight % 3600) / 60)
+  const seconds = Math.floor(secondsAfterMidnight % 60)
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
 
 function LogsPanel() {
   const logs = useStore(s => s.logs)
@@ -34,57 +44,67 @@ function LogsPanel() {
   )
 }
 
-function RiskPanel() {
-  const position = useStore(s => s.position)
-  const symbol = useStore(s => s.symbol)
-
-  return (
-    <div className="p-2">
-      <div className="grid grid-cols-5 gap-3">
-        <div className="flex flex-col">
-          <span className="text-[9px] text-muted-foreground tracking-wider">SYMBOL</span>
-          <span className="text-[11px] font-medium text-foreground">{position.symbol}</span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-[9px] text-muted-foreground tracking-wider">POSITION</span>
-          <span className={`text-[11px] font-medium ${position.qty > 0 ? 'text-buy' : position.qty < 0 ? 'text-sell' : 'text-foreground'}`}>
-            {position.qty > 0 ? '+' : ''}{position.qty}
-          </span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-[9px] text-muted-foreground tracking-wider">AVG PX</span>
-          <span className="text-[11px] font-medium text-foreground">
-            {position.avgPx > 0 ? formatPrice(position.avgPx, symbol) : '--'}
-          </span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-[9px] text-muted-foreground tracking-wider">REALIZED</span>
-          <span className={`text-[11px] font-medium ${position.realizedPnl >= 0 ? 'text-buy' : 'text-sell'}`}>
-            {formatPnl(position.realizedPnl)}
-          </span>
-        </div>
-        <div className="flex flex-col">
-          <span className="text-[9px] text-muted-foreground tracking-wider">UNREALIZED</span>
-          <span className={`text-[11px] font-medium ${position.unrealizedPnl >= 0 ? 'text-buy' : 'text-sell'}`}>
-            {formatPnl(position.unrealizedPnl)}
-          </span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function ReplayPanel() {
-  return (
-    <div className="p-2 flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] text-muted-foreground tracking-wider">TIMELINE</span>
-        <div className="flex-1">
-          <Slider defaultValue={[50]} min={0} max={100} step={1} className="w-full" />
-        </div>
+  const replayProgress = useStore(s => s.replayProgress)
+  const fetchProgress = useStore(s => s.fetchProgress)
+  const sessionId = useStore(s => s.sessionId)
+
+  useEffect(() => {
+    if (!sessionId) return
+    fetchProgress()
+    const id = setInterval(fetchProgress, 2000)
+    return () => clearInterval(id)
+  }, [sessionId, fetchProgress])
+
+  if (!replayProgress) {
+    return (
+      <div className="p-2 flex items-center justify-center h-full text-[10px] text-muted-foreground/50">
+        No replay session active
       </div>
-      <div className="text-[10px] text-muted-foreground">
-        Replay controls are available when session is in REPLAY mode.
+    )
+  }
+
+  return (
+    <div className="p-3 flex flex-col gap-2">
+      <div className="flex items-center gap-3">
+        <span className="text-[9px] text-muted-foreground tracking-wider w-16">PROGRESS</span>
+        <div className="flex-1">
+          <Progress value={replayProgress.progress_pct} className="h-2" />
+        </div>
+        <span className="text-[10px] text-foreground font-medium w-12 text-right">
+          {replayProgress.progress_pct.toFixed(1)}%
+        </span>
+      </div>
+
+      <div className="grid grid-cols-4 gap-3">
+        <div className="flex flex-col">
+          <span className="text-[9px] text-muted-foreground tracking-wider">EVENTS</span>
+          <span className="text-[11px] font-medium text-foreground">
+            {replayProgress.events_processed.toLocaleString()} / {replayProgress.total_events.toLocaleString()}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[9px] text-muted-foreground tracking-wider">MARKET TIME</span>
+          <span className="text-[11px] font-medium text-foreground">
+            {formatReplayTime(replayProgress.current_time)}
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[9px] text-muted-foreground tracking-wider">SPEED</span>
+          <span className="text-[11px] font-medium text-primary">
+            {replayProgress.speed}x
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[9px] text-muted-foreground tracking-wider">STATUS</span>
+          <span className={`text-[11px] font-medium ${
+            replayProgress.is_running ? 'text-buy' :
+            replayProgress.is_stopped ? 'text-sell' :
+            'text-warning'
+          }`}>
+            {replayProgress.is_running ? 'PLAYING' : replayProgress.is_stopped ? 'STOPPED' : 'PAUSED'}
+          </span>
+        </div>
       </div>
     </div>
   )
@@ -141,7 +161,7 @@ function SettingsPanel() {
 export function BottomDock() {
   const dockTab = useStore(s => s.dockTab)
   const setDockTab = useStore(s => s.setDockTab)
-  const tabs = ['logs', 'risk', 'replay', 'settings'] as const
+  const tabs = ['logs', 'replay', 'settings'] as const
 
   return (
     <div className="flex flex-col h-full border-t border-border bg-card">
@@ -164,7 +184,6 @@ export function BottomDock() {
       {/* Panel content */}
       <div className="flex-1 min-h-0 overflow-auto">
         {dockTab === 'logs' && <LogsPanel />}
-        {dockTab === 'risk' && <RiskPanel />}
         {dockTab === 'replay' && <ReplayPanel />}
         {dockTab === 'settings' && <SettingsPanel />}
       </div>
