@@ -4,8 +4,8 @@ import { useMemo, useState } from 'react'
 import {
   Bar,
   CartesianGrid,
+  Cell,
   ComposedChart,
-  Line,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -89,6 +89,11 @@ export function OhlcvPanel() {
   const latest = candles[candles.length - 1]
   const latestPrice = latest?.close ?? mid
 
+  const chartData = useMemo(
+    () => candles.map(c => ({ ...c, wick: [c.low, c.high], body: [Math.min(c.open, c.close), Math.max(c.open, c.close)] })),
+    [candles],
+  )
+
   return (
     <div className="flex flex-col h-full border-b border-border bg-card/40">
       <div className="h-7 px-2 border-b border-border flex items-center gap-2 text-[10px] tracking-wider text-muted-foreground">
@@ -125,8 +130,8 @@ export function OhlcvPanel() {
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={candles} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+            <ComposedChart data={chartData} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.12} />
               <XAxis
                 dataKey="bucketStart"
                 tickFormatter={(value) => formatCandleTime(value, timeframe.seconds)}
@@ -150,20 +155,46 @@ export function OhlcvPanel() {
                   borderRadius: 8,
                   fontSize: 11,
                 }}
-                formatter={(value: number, name: string) => {
+                formatter={(value: number | [number, number], name: string) => {
                   if (name === 'volume') return [value, 'Volume']
-                  return [formatPrice(Number(value), symbol), name.toUpperCase()]
+                  if (name === 'wick') {
+                    const [low, high] = value as [number, number]
+                    return [`L ${formatPrice(low, symbol)} / H ${formatPrice(high, symbol)}`, 'Range']
+                  }
+                  if (name === 'body') {
+                    const [openOrCloseLow, openOrCloseHigh] = value as [number, number]
+                    return [`Body ${formatPrice(openOrCloseLow, symbol)} → ${formatPrice(openOrCloseHigh, symbol)}`, 'Body']
+                  }
+                  return [value, name]
                 }}
                 labelFormatter={(label) => formatCandleTime(Number(label), timeframe.seconds)}
               />
 
               <ReferenceLine yAxisId="price" y={latestPrice} stroke="hsl(var(--primary))" strokeOpacity={0.35} />
 
-              <Bar yAxisId="volume" dataKey="volume" barSize={6} fill="hsl(var(--muted-foreground))" opacity={0.22} isAnimationActive={false} />
-              <Line yAxisId="price" type="monotone" dataKey="open" stroke="hsl(var(--muted-foreground))" strokeWidth={1} dot={false} isAnimationActive={false} />
-              <Line yAxisId="price" type="monotone" dataKey="high" stroke="#22c55e" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-              <Line yAxisId="price" type="monotone" dataKey="low" stroke="#ef4444" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-              <Line yAxisId="price" type="monotone" dataKey="close" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} isAnimationActive={false} />
+              <Bar
+                yAxisId="volume"
+                dataKey="volume"
+                barSize={6}
+                isAnimationActive={false}
+                opacity={0.25}
+              >
+                {chartData.map((c, i) => (
+                  <Cell key={`volume-${c.bucketStart}-${i}`} fill={c.close >= c.open ? '#22c55e' : '#ef4444'} />
+                ))}
+              </Bar>
+
+              <Bar yAxisId="price" dataKey="wick" barSize={2} isAnimationActive={false}>
+                {chartData.map((c, i) => (
+                  <Cell key={`wick-${c.bucketStart}-${i}`} fill={c.close >= c.open ? '#22c55e' : '#ef4444'} />
+                ))}
+              </Bar>
+
+              <Bar yAxisId="price" dataKey="body" barSize={8} radius={[1, 1, 1, 1]} isAnimationActive={false}>
+                {chartData.map((c, i) => (
+                  <Cell key={`body-${c.bucketStart}-${i}`} fill={c.close >= c.open ? '#22c55e' : '#ef4444'} />
+                ))}
+              </Bar>
             </ComposedChart>
           </ResponsiveContainer>
         )}
