@@ -3,7 +3,7 @@
 import { create } from 'zustand'
 import type { Trade, BookSnapshot, MicroStats, LogEntry, SessionState, Symbol } from './engine/models'
 import { fetchSnapshot } from '@/src/api/marketdata'
-import { getReplayProgress, type ReplayProgress } from '@/src/api/sessions'
+import { getReplayProgress, getSession, type ReplayProgress } from '@/src/api/sessions'
 
 interface Settings { ladderLevels: number; updateSpeed: number; density: 'compact' | 'comfy' }
 
@@ -71,9 +71,26 @@ export const useStore = create<TradingStore>((set, get) => ({
   updateSettings: (s) => set(state => ({ settings: { ...state.settings, ...s } })),
 
   connectSession: async (sessionId: string) => {
-    set({ sessionId })
-    localStorage.setItem('tt.session_id', sessionId)
-    await get().resyncSnapshot()
+    try {
+      const session = await getSession(sessionId)
+      if (session.status === 'STOPPED') {
+        localStorage.removeItem('tt.session_id')
+        set({ sessionId: null })
+        return
+      }
+
+      set({
+        sessionId,
+        symbol: session.symbol as Symbol,
+        replaySpeed: session.replay_speed,
+        sessionState: session.status === 'RUNNING' ? 'REPLAY' : 'PAUSED',
+      })
+      localStorage.setItem('tt.session_id', sessionId)
+      await get().resyncSnapshot()
+    } catch {
+      localStorage.removeItem('tt.session_id')
+      set({ sessionId: null })
+    }
   },
 
   setStreamStatus: (stream, status) =>
