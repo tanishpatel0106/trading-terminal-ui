@@ -1,9 +1,8 @@
 'use client'
 
-import { memo, useCallback, useRef, useEffect, useState } from 'react'
+import { memo, useRef, useEffect, useState } from 'react'
 import { useStore } from '@/lib/store'
 import { formatPrice, formatSize } from '@/lib/format'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 
 interface LadderRowProps {
   price: number
@@ -22,15 +21,12 @@ interface LadderRowProps {
   isFocused: boolean
   rowIndex: number
   symbol: string
-  onBidClick: (price: number) => void
-  onAskClick: (price: number) => void
 }
 
 const LadderRow = memo(function LadderRow({
   price, bidSize, bidCount, askSize, askCount,
   isBestBid, isBestAsk, isSpread, isMid, isLastTrade, lastTradeSide,
   bidHeat, askHeat, isFocused, symbol,
-  onBidClick, onAskClick,
 }: LadderRowProps) {
   const prevBidRef = useRef(bidSize)
   const prevAskRef = useRef(askSize)
@@ -75,27 +71,14 @@ const LadderRow = memo(function LadderRow({
       } ${isLastTrade ? (lastTradeSide === 'BUY' ? 'border-l-2 border-l-buy' : 'border-l-2 border-l-sell') : ''}`}
     >
       {/* Bid side */}
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => hasBid && onBidClick(price)}
-              className={`h-full flex items-center justify-end px-1 cursor-pointer hover:bg-buy/10 ${bidFlash} ${
-                isBestBid ? 'text-buy font-semibold' : 'text-buy/70'
-              }`}
-              style={hasBid ? { background: `rgba(34, 197, 94, ${bidHeat * 0.15})` } : undefined}
-            >
-              {hasBid ? formatSize(bidSize) : ''}
-            </button>
-          </TooltipTrigger>
-          {hasBid && (
-            <TooltipContent side="left" className="text-[10px] bg-card border-border">
-              <p>BUY LMT {formatPrice(price, symbol)}</p>
-              <p className="text-muted-foreground">{bidSize} @ {formatPrice(price, symbol)}</p>
-            </TooltipContent>
-          )}
-        </Tooltip>
-      </TooltipProvider>
+      <div
+        className={`h-full flex items-center justify-end px-1 ${bidFlash} ${
+          isBestBid ? 'text-buy font-semibold' : 'text-buy/70'
+        }`}
+        style={hasBid ? { background: `rgba(34, 197, 94, ${bidHeat * 0.15})` } : undefined}
+      >
+        {hasBid ? formatSize(bidSize) : ''}
+      </div>
 
       <div className={`h-full flex items-center justify-end px-1 text-[10px] ${isBestBid ? 'text-buy/80' : 'text-muted-foreground/50'}`}>
         {hasBid && bidCount > 0 ? bidCount : ''}
@@ -125,27 +108,14 @@ const LadderRow = memo(function LadderRow({
       </div>
 
       {/* Ask side */}
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => hasAsk && onAskClick(price)}
-              className={`h-full flex items-center justify-start px-1 cursor-pointer hover:bg-sell/10 ${askFlash} ${
-                isBestAsk ? 'text-sell font-semibold' : 'text-sell/70'
-              }`}
-              style={hasAsk ? { background: `rgba(239, 68, 68, ${askHeat * 0.15})` } : undefined}
-            >
-              {hasAsk ? formatSize(askSize) : ''}
-            </button>
-          </TooltipTrigger>
-          {hasAsk && (
-            <TooltipContent side="right" className="text-[10px] bg-card border-border">
-              <p>SELL LMT {formatPrice(price, symbol)}</p>
-              <p className="text-muted-foreground">{askSize} @ {formatPrice(price, symbol)}</p>
-            </TooltipContent>
-          )}
-        </Tooltip>
-      </TooltipProvider>
+      <div
+        className={`h-full flex items-center justify-start px-1 ${askFlash} ${
+          isBestAsk ? 'text-sell font-semibold' : 'text-sell/70'
+        }`}
+        style={hasAsk ? { background: `rgba(239, 68, 68, ${askHeat * 0.15})` } : undefined}
+      >
+        {hasAsk ? formatSize(askSize) : ''}
+      </div>
     </div>
   )
 })
@@ -153,19 +123,8 @@ const LadderRow = memo(function LadderRow({
 export function DomLadder() {
   const book = useStore(s => s.book)
   const symbol = useStore(s => s.symbol)
-  const selectedQty = useStore(s => s.selectedQty)
-  const selectedTif = useStore(s => s.selectedTif)
   const focusedIndex = useStore(s => s.focusedLadderIndex)
-  const placeOrder = useStore(s => s.placeOrder)
   const ladderRef = useRef<HTMLDivElement>(null)
-
-  const handleBidClick = useCallback((price: number) => {
-    placeOrder('BUY', 'LMT', price, selectedQty, selectedTif)
-  }, [placeOrder, selectedQty, selectedTif])
-
-  const handleAskClick = useCallback((price: number) => {
-    placeOrder('SELL', 'LMT', price, selectedQty, selectedTif)
-  }, [placeOrder, selectedQty, selectedTif])
 
   // Build unified ladder
   const { bids, asks, lastTradePrice, lastTradeSide } = book
@@ -183,7 +142,6 @@ export function DomLadder() {
   const bestAsk = asks[0].price
   const mid = (bestBid + bestAsk) / 2
 
-  // Build ladder rows: asks (reversed) + spread + bids
   const rows: Array<{
     price: number; bidSize: number; bidCount: number; askSize: number; askCount: number
     isBestBid: boolean; isBestAsk: boolean; isSpread: boolean; isMid: boolean
@@ -253,8 +211,6 @@ export function DomLadder() {
             rowIndex={i}
             isFocused={focusedIndex === i}
             symbol={symbol}
-            onBidClick={handleBidClick}
-            onAskClick={handleAskClick}
           />
         ))}
       </div>

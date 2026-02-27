@@ -1,5 +1,3 @@
-export type SessionMode = 'LIVE' | 'HISTORICAL_REPLAY' | 'LP_REPLAY'
-
 export interface Level {
   price: number
   size: number
@@ -30,13 +28,3 @@ export interface TradeEvent {
   aggressor: 'B' | 'S'
 }
 
-export interface OrderEvent {
-  event: 'order'
-  ts: number
-  order_id: string
-  status: string
-  side?: 'B' | 'S'
-  price?: number
-  qty?: number
-  leaves_qty?: number
-}

@@ -2,9 +2,9 @@ import asyncio
 from uuid import UUID
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
-from app.api.deps import get_broadcaster, get_runtime
+from app.api.deps import get_broadcaster, get_replay_session
 from app.services.broadcaster import Broadcaster
-from app.services.exchange_runtime import ExchangeRuntime
+from app.services.replay_service import ReplaySession
 from app.utils.time import now_ms
 
 router = APIRouter()
@@ -15,12 +15,12 @@ async def marketdata_ws(
     session_id: UUID,
     websocket: WebSocket,
     broadcaster: Broadcaster = Depends(get_broadcaster),
-    runtime: ExchangeRuntime = Depends(get_runtime),
+    replay: ReplaySession = Depends(get_replay_session),
 ) -> None:
     sid = str(session_id)
     await broadcaster.connect_marketdata(sid, websocket)
     await broadcaster.send_direct(websocket, {"event": "hello", "session_id": sid, "stream": "marketdata", "ts": now_ms()})
-    snapshot = await runtime.get_snapshot(levels=20)
+    snapshot = await replay.get_snapshot(levels=20)
     await broadcaster.send_direct(websocket, {"event": "snapshot", "bids": snapshot["bids"], "asks": snapshot["asks"], "ts": now_ms()})
     try:
         while True:

@@ -8,3 +8,10 @@ node_modules/
 .next/
 .env*.local
 .DS_Store
+
+# Python
+__pycache__/
+*.pyc
+
+# Build artifacts
+tsconfig.tsbuildinfo

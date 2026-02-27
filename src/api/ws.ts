@@ -3,7 +3,7 @@
 import { useEffect } from 'react'
 import { fetchSnapshot } from './marketdata'
 import { wsUrl } from './client'
-import type { MarketDataSnapshot, OrderEvent, TradeEvent } from './contracts'
+import type { MarketDataSnapshot, TradeEvent } from './contracts'
 
 type Status = 'connected' | 'reconnecting' | 'disconnected'
 
@@ -33,7 +33,7 @@ export class WSManager<T extends { event?: string }> {
   }
 
   private connect() {
-    this.onStatus(this.retryMs === 1000 ? 'reconnecting' : 'reconnecting')
+    this.onStatus('reconnecting')
     this.ws = new WebSocket(wsUrl(this.path))
     this.ws.onopen = () => {
       this.retryMs = 1000
@@ -83,13 +83,4 @@ export function useTradesStream(sessionId: string | null, onMessage: (msg: Trade
     manager.start()
     return () => manager.stop()
   }, [sessionId, onMessage, onStatus])
-}
-
-export function useOrderUpdatesStream(sessionId: string | null, userId: string | null, onMessage: (msg: OrderEvent | any) => void, onStatus: (s: Status) => void) {
-  useEffect(() => {
-    if (!sessionId || !userId) return
-    const manager = new WSManager<OrderEvent>(`/ws/sessions/${sessionId}/orders?user_id=${encodeURIComponent(userId)}`, onMessage, onStatus)
-    manager.start()
-    return () => manager.stop()
-  }, [sessionId, userId, onMessage, onStatus])
 }
