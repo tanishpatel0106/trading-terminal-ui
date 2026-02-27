@@ -5,6 +5,7 @@ import { useStore } from '@/lib/store'
 import { useMarketDataStream, useTradesStream } from '@/src/api/ws'
 import { TopBar } from './TopBar'
 import { DomLadder } from './DomLadder'
+import { OhlcvPanel } from './OhlcvPanel'
 import { TimeSales } from './TimeSales'
 import { MicroStats } from './MicroStats'
 import { BottomDock } from './BottomDock'
@@ -75,7 +76,14 @@ export function AppShell() {
               </span>
             </div>
           )}
-          <DomLadder />
+          <div className="flex-1 min-h-0 grid grid-rows-2">
+            <div className="min-h-0">
+              <OhlcvPanel />
+            </div>
+            <div className="min-h-0">
+              <DomLadder />
+            </div>
+          </div>
         </div>
 
         <div className="flex flex-col min-h-0 border-l border-border bg-card">
