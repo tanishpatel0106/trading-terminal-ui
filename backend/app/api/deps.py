@@ -30,8 +30,12 @@ async def get_replay_session(
 
     replay = ReplaySession(session_id=session.id, ticker=session.symbol, broadcaster=br)
     replay.speed = session.replay_speed
-    replay.is_stopped = session.status.value == "STOPPED"
-    replay.is_running = session.status.value == "RUNNING"
+
+    if session.status.value == "STOPPED":
+        replay.is_stopped = True
+    elif session.status.value == "RUNNING":
+        replay.start()
+
     replay_sessions[sid] = replay
     return replay
 
